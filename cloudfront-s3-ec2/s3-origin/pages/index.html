@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CloudFront + S3 + EC2 ハンズオン</title>
+    <link rel="stylesheet" href="/pages/static/style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <p class="eyebrow">CloudFront / S3 / EC2</p>
+        <h1>キャッシュと動的処理を 1 画面で体験する</h1>
+        <p>
+          この画面自体は S3 オリジンの <code>/pages/*</code> から配信しつつ、<code>/pages/static/*</code> は CloudFront のキャッシュ確認、<code>/api/*</code> は EC2 オリジンの状態確認に使います。
+        </p>
+      </header>
+
+      <section class="card">
+        <h2>1. S3 キャッシュ確認</h2>
+        <p>
+          ボタンを押すたびに <code>/pages/static/cache-demo.txt</code> を再取得します。<br />
+          取得結果の本文と <code>x-cache</code>, <code>age</code> を見比べて、CloudFront のキャッシュヒットを確認してください。
+        </p>
+        <button id="cache-button" class="button">S3 キャッシュ情報を取得</button>
+        <dl class="meta-grid" id="cache-meta">
+          <div><dt>本文</dt><dd id="cache-body">未取得</dd></div>
+          <div><dt>x-cache</dt><dd id="cache-x-cache">-</dd></div>
+          <div><dt>age</dt><dd id="cache-age">-</dd></div>
+          <div><dt>etag</dt><dd id="cache-etag">-</dd></div>
+          <div><dt>last-modified</dt><dd id="cache-last-modified">-</dd></div>
+          <div><dt>取得時刻</dt><dd id="cache-fetched-at">-</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>2. EC2 の状態保持確認</h2>
+        <p>
+          <code>/api/state</code> で EC2 サーバーの状態を取得します。<br />
+          メモを保存すると、同じプロセスが動いている間はサーバー側に残り続けます。
+        </p>
+        <div class="stack-on-mobile actions">
+          <button id="state-button" class="button">サーバー状態を更新</button>
+          <span id="state-status" class="status">未取得</span>
+        </div>
+        <pre id="state-output" class="code-block">ここにサーバー状態が表示されます</pre>
+
+        <label class="field">
+          <span>保存するメモ</span>
+          <input id="memo-input" type="text" maxlength="120" placeholder="例: CloudFront 経由でも EC2 のメモは保持される" />
+        </label>
+        <button id="memo-button" class="button secondary">メモを保存</button>
+        <p id="memo-status" class="status">まだメモを保存していません</p>
+      </section>
+
+      <section class="card">
+        <h2>3. EC2 のサーバー側処理確認</h2>
+        <p>
+          数値をカンマ区切りで入力すると、<code>/api/calculate</code> に送信して合計と平均を EC2 側で計算します。
+        </p>
+        <label class="field">
+          <span>数値一覧</span>
+          <input id="numbers-input" type="text" value="10, 20, 35" placeholder="例: 10, 20, 35" />
+        </label>
+        <button id="calculate-button" class="button">サーバーで計算する</button>
+        <pre id="calc-output" class="code-block">ここに計算結果が表示されます</pre>
+      </section>
+    </main>
+
+    <script src="/pages/static/app.js" defer></script>
+  </body>
+</html>
