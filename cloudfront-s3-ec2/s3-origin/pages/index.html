@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CloudFront + S3 + EC2 ハンズオン</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/pages/static/style.css" />
   </head>
   <body>
     <main class="layout">
@@ -12,14 +12,14 @@
         <p class="eyebrow">CloudFront / S3 / EC2</p>
         <h1>キャッシュと動的処理を 1 画面で体験する</h1>
         <p>
-          この画面自体は S3 オリジンから配信しつつ、<code>/static/*</code> は CloudFront のキャッシュ確認、<code>/api/*</code> は EC2 オリジンの状態確認に使います。
+          この画面自体は S3 オリジンの <code>/pages/*</code> から配信しつつ、<code>/pages/static/*</code> は CloudFront のキャッシュ確認、<code>/api/*</code> は EC2 オリジンの状態確認に使います。
         </p>
       </header>
 
       <section class="card">
         <h2>1. S3 キャッシュ確認</h2>
         <p>
-          ボタンを押すたびに <code>/static/cache-demo.txt</code> を再取得します。<br />
+          ボタンを押すたびに <code>/pages/static/cache-demo.txt</code> を再取得します。<br />
           取得結果の本文と <code>x-cache</code>, <code>age</code> を見比べて、CloudFront のキャッシュヒットを確認してください。
         </p>
         <button id="cache-button" class="button">S3 キャッシュ情報を取得</button>
@@ -67,6 +67,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/pages/static/app.js" defer></script>
   </body>
 </html>

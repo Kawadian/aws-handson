@@ -42,7 +42,7 @@ async function loadCacheInfo() {
   byId("cache-button").disabled = true;
 
   try {
-    const { body, headers } = await fetchTextWithHeaders("/static/cache-demo.txt");
+    const { body, headers } = await fetchTextWithHeaders("/pages/static/cache-demo.txt");
     byId("cache-body").textContent = body.trim() || "(空文字列)";
     byId("cache-x-cache").textContent = headers.get("x-cache") || "(CloudFront 経由でないため未取得)";
     byId("cache-age").textContent = headers.get("age") || "-";

@@ -15,19 +15,20 @@ cloudfront-s3-ec2/
 ├── ec2-origin/
 │   └── server.py
 └── s3-origin/
-    ├── index.html
-    └── static/
-        ├── app.js
-        ├── cache-demo.txt
-        └── style.css
+    └── pages/
+        ├── index.html
+        └── static/
+            ├── app.js
+            ├── cache-demo.txt
+            └── style.css
 ```
 
 ## ゴール
 
 このハンズオンが完了すると、CloudFront 配下で次のようにアクセスできる状態になります。
 
-- `https://<CloudFrontのドメイン>/` → **S3 オリジン**の画面
-- `https://<CloudFrontのドメイン>/static/cache-demo.txt` → **S3 オリジン**のキャッシュ確認用ファイル
+- `https://<CloudFrontのドメイン>/pages/index.html` → **S3 オリジン**の静的サイト
+- `https://<CloudFrontのドメイン>/pages/static/cache-demo.txt` → **S3 オリジン**のキャッシュ確認用ファイル
 - `https://<CloudFrontのドメイン>/api/state` → **EC2 オリジン**の状態確認 API
 - `https://<CloudFrontのドメイン>/api/memos` → **EC2 オリジン**のメモ保存 API
 - `https://<CloudFrontのドメイン>/api/calculate` → **EC2 オリジン**のサーバー側計算 API
@@ -42,35 +43,35 @@ cloudfront-s3-ec2/
 
 ## 1. S3 用ファイルをアップロードする
 
-S3 オリジンに使うファイルは `s3-origin/` 配下です。
+S3 オリジンに使うファイルは `s3-origin/pages/` 配下です。
 
 ### 手動でアップロードする場合
 
 S3 バケットに次のように配置してください。
 
-- `s3-origin/index.html` → `index.html`
-- `s3-origin/static/app.js` → `static/app.js`
-- `s3-origin/static/style.css` → `static/style.css`
-- `s3-origin/static/cache-demo.txt` → `static/cache-demo.txt`
+- `s3-origin/pages/index.html` → `pages/index.html`
+- `s3-origin/pages/static/app.js` → `pages/static/app.js`
+- `s3-origin/pages/static/style.css` → `pages/static/style.css`
+- `s3-origin/pages/static/cache-demo.txt` → `pages/static/cache-demo.txt`
 
 ### AWS CLI でアップロードする場合
 
 `<YOUR_BUCKET_NAME>` を実際のバケット名に置き換えて実行します。
 
 ```bash
-aws s3 cp /path/to/cloudfront-s3-ec2/s3-origin/index.html s3://<YOUR_BUCKET_NAME>/index.html \
+aws s3 cp /path/to/cloudfront-s3-ec2/s3-origin/pages/index.html s3://<YOUR_BUCKET_NAME>/pages/index.html \
   --content-type text/html \
   --cache-control no-cache
 
-aws s3 cp /path/to/cloudfront-s3-ec2/s3-origin/static s3://<YOUR_BUCKET_NAME>/static/ \
+aws s3 cp /path/to/cloudfront-s3-ec2/s3-origin/pages/static s3://<YOUR_BUCKET_NAME>/pages/static/ \
   --recursive \
   --cache-control public,max-age=300
 ```
 
 ### S3 側で確認したいこと
 
-- `index.html` は更新を反映しやすいように `no-cache`
-- `static/cache-demo.txt` は `max-age=300` を付けて、CloudFront のキャッシュヒットを観察しやすくする
+- `pages/index.html` は更新を反映しやすいように `no-cache`
+- `pages/static/cache-demo.txt` は `max-age=300` を付けて、CloudFront のキャッシュヒットを観察しやすくする
 
 ## 2. EC2 にサーバーを配置する
 
@@ -121,19 +122,21 @@ python3 server.py --host 0.0.0.0 --port 8080
 ### ビヘイビア
 
 1. **Default behavior (`*`)**
-   - Origin: S3
-2. **`/api/*` behavior**
-   - Origin: EC2
-   - Allowed methods: `GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE` のうち最低でも `GET, HEAD, OPTIONS, POST`
-   - Cache policy: 動的 API と分かるもの（例: CachingDisabled）
+   - Origin: S3（または説明用のシンプルなトップページ）
+2. **`/pages/*` behavior**
+    - Origin: S3
+3. **`/api/*` behavior**
+    - Origin: EC2
+    - Allowed methods: `GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE` のうち最低でも `GET, HEAD, OPTIONS, POST`
+    - Cache policy: 動的 API と分かるもの（例: CachingDisabled）
 
-これで `/` や `/static/*` は S3、`/api/*` は EC2 へ振り分けられます。
+これで `/pages/*` は S3、`/api/*` は EC2 へ振り分けられます。
 
 ## 4. 動作確認する
 
 ### 4-1. S3 キャッシュの確認
 
-1. `https://<CloudFrontのドメイン>/` を開く
+1. `https://<CloudFrontのドメイン>/pages/index.html` を開く
 2. **「S3 キャッシュ情報を取得」** を押す
 3. 画面上に次のような情報が表示されることを確認する
    - `x-cache`
@@ -141,7 +144,7 @@ python3 server.py --host 0.0.0.0 --port 8080
    - `etag`
    - `last-modified`
 4. 同じボタンを数回押し、`x-cache: Hit from cloudfront` が出ることを確認する
-5. S3 上の `static/cache-demo.txt` を書き換える
+5. S3 上の `pages/static/cache-demo.txt` を書き換える
 6. すぐに再度 CloudFront 経由で取得し、古い内容のままなら CloudFront キャッシュが効いている
 7. S3 へ直接アクセスした内容と比較して差が出れば、キャッシュの効果を体感できる
 

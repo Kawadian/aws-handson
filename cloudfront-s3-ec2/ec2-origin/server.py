@@ -69,7 +69,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         self._write_json(HTTPStatus.NOT_FOUND, {"error": "Not Found"})
 
     def log_message(self, format: str, *args: Any) -> None:
-        print("[%s] %s" % (self.log_date_time_string(), format % args))
+        print(f"[{self.log_date_time_string()}] {format % args}")
 
     def _set_common_headers(self) -> None:
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -207,7 +207,7 @@ class DemoHandler(BaseHTTPRequestHandler):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CloudFront + EC2 handson demo server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind")
+    parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
     return parser.parse_args()
 
