@@ -1,0 +1,150 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+  background: #f3f4f6;
+  color: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #eff6ff 0%, #f9fafb 28%, #f3f4f6 100%);
+}
+
+code {
+  background: #e5e7eb;
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+}
+
+.layout {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+.hero,
+.card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(30, 64, 175, 0.08);
+}
+
+.hero {
+  padding: 28px;
+  margin-bottom: 20px;
+}
+
+.card {
+  padding: 24px;
+  margin-top: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+}
+
+h1,
+h2 {
+  line-height: 1.3;
+  margin-top: 0;
+}
+
+.button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 12px 18px;
+  cursor: pointer;
+}
+
+.button.secondary {
+  background: #0f766e;
+}
+
+.button:hover {
+  filter: brightness(1.05);
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 12px;
+}
+
+.field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 1rem;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.status {
+  color: #334155;
+  font-weight: 600;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.meta-grid div {
+  background: #eff6ff;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.meta-grid dt {
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.meta-grid dd {
+  margin: 8px 0 0;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.code-block {
+  margin: 14px 0 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  overflow-x: auto;
+  min-height: 120px;
+}
+
+@media (max-width: 640px) {
+  .layout {
+    padding-inline: 14px;
+  }
+
+  .stack-on-mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

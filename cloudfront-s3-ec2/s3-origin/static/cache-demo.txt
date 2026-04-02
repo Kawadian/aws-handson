@@ -1,0 +1,2 @@
+CloudFront cache demo v1
+このファイルを書き換えてから CloudFront 経由で読み直すと、TTL の間は古い内容が返ることがあります。
