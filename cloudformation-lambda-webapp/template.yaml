@@ -1,0 +1,363 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  タスク管理 Web アプリのサーバーレス構成。
+  S3（静的ホスティング）+ API Gateway + Lambda + DynamoDB を
+  CloudFormation で一括デプロイするハンズオン教材です。
+
+# --------------------------------------------------------------------------- #
+# Parameters                                                                    #
+# --------------------------------------------------------------------------- #
+Parameters:
+  ProjectName:
+    Type: String
+    Default: task-app
+    Description: 各リソース名に付けるプレフィックス（小文字英数字とハイフンのみ）
+    AllowedPattern: '[a-z0-9-]+'
+    MinLength: 1
+    MaxLength: 24
+
+# --------------------------------------------------------------------------- #
+# Resources                                                                     #
+# --------------------------------------------------------------------------- #
+Resources:
+
+  # ========== DynamoDB ========== #
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-tasks'
+      BillingMode: PAY_PER_REQUEST        # Free Tier: オンデマンドは月 25 WCU / 25 RCU まで無料
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  # ========== IAM Role for Lambda ========== #
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # CloudWatch Logs への書き込み権限（Lambda 基本実行ロール）
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBCRUD
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt TasksTable.Arn
+
+  # ========== Lambda Function ========== #
+  TasksFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-handler'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TasksTable
+      Code:
+        ZipFile: |
+          import json, boto3, os, uuid
+          from datetime import datetime, timezone
+          from decimal import Decimal
+
+          ddb = boto3.resource('dynamodb').Table(os.environ['TABLE_NAME'])
+
+          CORS = {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Headers': 'Content-Type',
+              'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+          }
+
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, o):
+                  return int(o) if isinstance(o, Decimal) else super().default(o)
+
+          def res(code, body):
+              return {'statusCode': code, 'headers': CORS, 'body': json.dumps(body, cls=DecimalEncoder)}
+
+          def handler(event, ctx):
+              m = event['httpMethod']
+              p = event.get('path', '')
+              pp = event.get('pathParameters') or {}
+
+              if m == 'OPTIONS':
+                  return res(200, {})
+
+              try:
+                  if m == 'GET' and p == '/tasks':
+                      r = ddb.scan()
+                      items = sorted(r.get('Items', []), key=lambda x: x.get('createdAt', ''))
+                      return res(200, items)
+
+                  if m == 'POST' and p == '/tasks':
+                      b = json.loads(event['body'])
+                      if not b.get('title', '').strip():
+                          return res(400, {'error': 'title は必須です'})
+                      item = {
+                          'id': str(uuid.uuid4()),
+                          'title': b['title'].strip(),
+                          'completed': False,
+                          'createdAt': datetime.now(timezone.utc).isoformat(),
+                      }
+                      ddb.put_item(Item=item)
+                      return res(201, item)
+
+                  if m == 'PUT':
+                      b = json.loads(event['body'])
+                      r = ddb.update_item(
+                          Key={'id': pp['id']},
+                          UpdateExpression='SET completed = :c',
+                          ExpressionAttributeValues={':c': bool(b['completed'])},
+                          ReturnValues='ALL_NEW',
+                      )
+                      return res(200, r['Attributes'])
+
+                  if m == 'DELETE':
+                      ddb.delete_item(Key={'id': pp['id']})
+                      return res(200, {'message': 'Deleted'})
+
+                  return res(404, {'error': 'Not found'})
+
+              except Exception as e:
+                  return res(500, {'error': str(e)})
+
+  # ========== API Gateway ========== #
+  TasksApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${ProjectName}-api'
+      Description: タスク管理 REST API
+
+  # /tasks
+  TasksResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref TasksApi
+      ParentId: !GetAtt TasksApi.RootResourceId
+      PathPart: tasks
+
+  # /tasks/{id}
+  TaskIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref TasksApi
+      ParentId: !Ref TasksResource
+      PathPart: '{id}'
+
+  # GET /tasks
+  GetTasksMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TasksApi
+      ResourceId: !Ref TasksResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FuncArn}/invocations'
+          - FuncArn: !GetAtt TasksFunction.Arn
+
+  # POST /tasks
+  PostTasksMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TasksApi
+      ResourceId: !Ref TasksResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FuncArn}/invocations'
+          - FuncArn: !GetAtt TasksFunction.Arn
+
+  # OPTIONS /tasks  (CORS preflight)
+  OptionsTasksMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TasksApi
+      ResourceId: !Ref TasksResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # PUT /tasks/{id}
+  PutTaskMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TasksApi
+      ResourceId: !Ref TaskIdResource
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FuncArn}/invocations'
+          - FuncArn: !GetAtt TasksFunction.Arn
+
+  # DELETE /tasks/{id}
+  DeleteTaskMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TasksApi
+      ResourceId: !Ref TaskIdResource
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FuncArn}/invocations'
+          - FuncArn: !GetAtt TasksFunction.Arn
+
+  # OPTIONS /tasks/{id}  (CORS preflight)
+  OptionsTaskIdMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TasksApi
+      ResourceId: !Ref TaskIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+              method.response.header.Access-Control-Allow-Methods: "'PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Deployment（すべての Method が作成されてから実行）
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetTasksMethod
+      - PostTasksMethod
+      - OptionsTasksMethod
+      - PutTaskMethod
+      - DeleteTaskMethod
+      - OptionsTaskIdMethod
+    Properties:
+      RestApiId: !Ref TasksApi
+
+  # API Stage: prod
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref TasksApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+
+  # Lambda に API Gateway からの呼び出しを許可
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TasksFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TasksApi}/*'
+
+  # ========== S3 (Static Website Hosting) ========== #
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # アカウント ID をサフィックスに付けてバケット名をグローバルユニークにする
+      BucketName: !Sub '${ProjectName}-frontend-${AWS::AccountId}'
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+
+# --------------------------------------------------------------------------- #
+# Outputs                                                                       #
+# --------------------------------------------------------------------------- #
+Outputs:
+  ApiEndpoint:
+    Description: >-
+      API Gateway エンドポイント URL。
+      フロントエンドの「API 設定」に貼り付けてください。
+    Value: !Sub 'https://${TasksApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+
+  WebsiteURL:
+    Description: S3 静的ウェブサイトの URL（index.html をアップロード後に開いてください）
+    Value: !GetAtt FrontendBucket.WebsiteURL
+
+  FrontendBucketName:
+    Description: フロントエンドのファイルをアップロードする S3 バケット名
+    Value: !Ref FrontendBucket
+
+  DynamoDBTableName:
+    Description: DynamoDB テーブル名
+    Value: !Ref TasksTable
+
+  LambdaFunctionName:
+    Description: Lambda 関数名
+    Value: !Ref TasksFunction
