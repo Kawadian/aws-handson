@@ -449,12 +449,14 @@ Resources:
           def audit(user, action, detail=''):
             try:
               ddb.put_item(Item={'pk':user,'sk':f'{int(time.time()*1000)}#{uuid.uuid4().hex[:8]}','action':action,'detail':detail,'ttl':int(time.time())+86400*30})
-            except: pass
+            except Exception as e:
+              print(f'Audit log error: {e}')
 
           def enqueue(action, task_id, user):
             try:
               sqs.send_message(QueueUrl=Q_URL,MessageBody=json.dumps({'action':action,'taskId':task_id,'user':user}))
-            except: pass
+            except Exception as e:
+              print(f'SQS enqueue error: {e}')
 
           def handler(event, ctx):
             m = event['httpMethod']
@@ -615,7 +617,13 @@ Resources:
           def handler(event, context):
             try:
               if event['RequestType'] in ('Create', 'Update'):
-                time.sleep(10)
+                for attempt in range(6):
+                  try:
+                    run('SELECT 1')
+                    break
+                  except Exception:
+                    print(f'DB not ready, retry {attempt+1}/6...')
+                    time.sleep(10 * (attempt + 1))
                 run("""CREATE TABLE IF NOT EXISTS tasks (
                   id VARCHAR(36) PRIMARY KEY,
                   user_id VARCHAR(128) NOT NULL,
@@ -689,7 +697,8 @@ Resources:
                   cf.create_invalidation(DistributionId=dist_id,
                     InvalidationBatch={'Paths':{'Quantity':1,'Items':['/*']},
                                        'CallerReference':str(time.time())})
-                except: pass
+                except Exception as e:
+                  print(f'CloudFront invalidation skipped: {e}')
 
               cfnresponse.send(event, context, cfnresponse.SUCCESS,
                 {'URL': f'https://{cf_domain}'})
