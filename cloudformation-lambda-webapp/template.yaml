@@ -337,9 +337,9 @@ Resources:
             raw = event.get('body')
             return json.loads(raw if raw is not None else '{}')
 
-          def require_email(email):
+          def ensure_email_present(email):
             if email:
-              return email
+              return
             raise ValueError('email claim is required')
 
           def task_item_to_response(item):
@@ -434,7 +434,7 @@ Resources:
 
               # --- Profile ---
               if m == 'GET' and p == '/profile':
-                email = require_email(email)
+                ensure_email_present(email)
                 item = profiles_table.get_item(Key={'user_id': uid}).get('Item')
                 if not item:
                   item = {
