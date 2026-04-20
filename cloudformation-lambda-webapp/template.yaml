@@ -35,11 +35,22 @@ Resources:
           AttributeType: S
         - AttributeName: task_id
           AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
       KeySchema:
         - AttributeName: user_id
           KeyType: HASH
         - AttributeName: task_id
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserCreatedAtIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-tasks'
@@ -188,6 +199,7 @@ Resources:
                   - dynamodb:Query
                 Resource:
                   - !GetAtt TasksTable.Arn
+                  - !Sub '${TasksTable.Arn}/index/*'
                   - !GetAtt UserProfilesTable.Arn
         - PolicyName: AuditLog
           PolicyDocument:
@@ -321,6 +333,10 @@ Resources:
           def now_iso():
             return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
+          def parse_body(event):
+            raw = event.get('body')
+            return json.loads(raw if raw is not None else '{}')
+
           def require_email(email):
             if email:
               return email
@@ -360,13 +376,14 @@ Resources:
               # --- Tasks CRUD ---
               if m == 'GET' and p == '/tasks':
                 items = tasks_table.query(
-                  KeyConditionExpression=Key('user_id').eq(uid)
+                  IndexName='UserCreatedAtIndex',
+                  KeyConditionExpression=Key('user_id').eq(uid),
+                  ScanIndexForward=False
                 ).get('Items', [])
-                items.sort(key=lambda item: item.get('created_at', ''), reverse=True)
                 return res(200, [task_item_to_response(item) for item in items])
 
               if m == 'POST' and p == '/tasks':
-                b = json.loads(event.get('body') or '{}')
+                b = parse_body(event)
                 title = b.get('title','').strip()
                 if not title: return res(400,{'error':'title is required'})
                 tid = str(uuid.uuid4())
@@ -384,7 +401,7 @@ Resources:
 
               if m == 'PUT' and '/tasks/' in p:
                 tid = pp.get('id','')
-                b = json.loads(event.get('body') or '{}')
+                b = parse_body(event)
                 comp = bool(b.get('completed'))
                 try:
                   tasks_table.update_item(
@@ -430,7 +447,7 @@ Resources:
                 return res(200,item)
 
               if m == 'PUT' and p == '/profile':
-                b = json.loads(event.get('body') or '{}')
+                b = parse_body(event)
                 dn = b.get('display_name','').strip()
                 if not dn: return res(400,{'error':'display_name is required'})
                 try:
