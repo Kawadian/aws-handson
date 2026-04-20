@@ -338,9 +338,8 @@ Resources:
             return json.loads(body_str if body_str is not None else '{}')
 
           def ensure_email_present(email):
-            if email:
-              return
-            raise ValueError('email claim is required')
+            if not email:
+              raise ValueError('email claim is required')
 
           def task_item_to_response(item):
             return {
@@ -407,7 +406,7 @@ Resources:
                   tasks_table.update_item(
                     Key={'user_id': uid, 'task_id': tid},
                     UpdateExpression='SET completed = :completed',
-                    ConditionExpression='attribute_exists(task_id)',
+                    ConditionExpression='attribute_exists(user_id)',
                     ExpressionAttributeValues={':completed': comp}
                   )
                 except ClientError as e:
@@ -422,7 +421,7 @@ Resources:
                 try:
                   tasks_table.delete_item(
                     Key={'user_id': uid, 'task_id': tid},
-                    ConditionExpression='attribute_exists(task_id)'
+                    ConditionExpression='attribute_exists(user_id)'
                   )
                 except ClientError as e:
                   if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
