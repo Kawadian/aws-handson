@@ -26,7 +26,7 @@ CloudFront ──OAC──▶ S3 バケット          Cognito User Pool
        │   │   │                  │
        ▼   ▼   ▼                  ▼
    DynamoDB DynamoDB DynamoDB SQS ────▶ SNS
-   (タスク) (プロフィール) (監査ログ) (キュー)  (通知)
+   (Tasks)  (Profiles) (Audit)   (キュー)  (通知)
 ```
 
 ## リソース一覧（41 リソース）

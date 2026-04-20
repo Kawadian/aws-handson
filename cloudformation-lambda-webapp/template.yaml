@@ -411,7 +411,7 @@ Resources:
                   )
                 except ClientError as e:
                   if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-                    return res(404,{'error':'not found'})
+                    return res(404,{'error':'task not found'})
                   raise
                 audit(uid,'UPDATE_TASK',tid)
                 return res(200,{'id':tid,'completed':comp})
@@ -425,7 +425,7 @@ Resources:
                   )
                 except ClientError as e:
                   if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-                    return res(404,{'error':'not found'})
+                    return res(404,{'error':'task not found'})
                   raise
                 audit(uid,'DELETE_TASK',tid)
                 enqueue('deleted',tid,uid)
@@ -442,7 +442,16 @@ Resources:
                     'display_name': email.split("@")[0],
                     'created_at': now_iso()
                   }
-                  profiles_table.put_item(Item=item)
+                  try:
+                    profiles_table.put_item(
+                      Item=item,
+                      ConditionExpression='attribute_not_exists(user_id)'
+                    )
+                  except ClientError as e:
+                    if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                      item = profiles_table.get_item(Key={'user_id': uid}).get('Item', item)
+                    else:
+                      raise
                 return res(200,item)
 
               if m == 'PUT' and p == '/profile':
@@ -466,6 +475,8 @@ Resources:
                 return res(200,{'display_name':dn})
 
               return res(404,{'error':'not found'})
+            except ValueError as e:
+              return res(400,{'error':str(e)})
             except Exception as e:
               print(f'Error: {e}')
               return res(500,{'error':str(e)})
