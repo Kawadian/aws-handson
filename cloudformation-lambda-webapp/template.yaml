@@ -334,8 +334,8 @@ Resources:
             return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
           def parse_body(event):
-            raw = event.get('body')
-            return json.loads(raw if raw is not None else '{}')
+            body_str = event.get('body')
+            return json.loads(body_str if body_str is not None else '{}')
 
           def ensure_email_present(email):
             if email:
@@ -344,10 +344,10 @@ Resources:
 
           def task_item_to_response(item):
             return {
-              'id': item['task_id'],
+              'id': item.get('task_id', ''),
               'title': item.get('title', ''),
               'completed': bool(item.get('completed', False)),
-              'created_at': item.get('created_at')
+              'created_at': item.get('created_at', '')
             }
 
           def audit(user, action, detail=''):
