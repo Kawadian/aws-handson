@@ -321,6 +321,11 @@ Resources:
           def now_iso():
             return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
+          def require_email(email):
+            if email:
+              return email
+            raise ValueError('email claim is required')
+
           def task_item_to_response(item):
             return {
               'id': item['task_id'],
@@ -412,12 +417,13 @@ Resources:
 
               # --- Profile ---
               if m == 'GET' and p == '/profile':
+                email = require_email(email)
                 item = profiles_table.get_item(Key={'user_id': uid}).get('Item')
                 if not item:
                   item = {
                     'user_id': uid,
                     'email': email,
-                    'display_name': email.split("@")[0] if email else 'guest',
+                    'display_name': email.split("@")[0],
                     'created_at': now_iso()
                   }
                   profiles_table.put_item(Item=item)
@@ -427,15 +433,19 @@ Resources:
                 b = json.loads(event.get('body') or '{}')
                 dn = b.get('display_name','').strip()
                 if not dn: return res(400,{'error':'display_name is required'})
-                profiles_table.update_item(
-                  Key={'user_id': uid},
-                  UpdateExpression='SET display_name = :display_name, email = if_not_exists(email, :email), created_at = if_not_exists(created_at, :created_at)',
-                  ExpressionAttributeValues={
-                    ':display_name': dn,
-                    ':email': email,
-                    ':created_at': now_iso()
-                  }
-                )
+                try:
+                  profiles_table.update_item(
+                    Key={'user_id': uid},
+                    UpdateExpression='SET display_name = :display_name',
+                    ConditionExpression='attribute_exists(user_id)',
+                    ExpressionAttributeValues={
+                      ':display_name': dn
+                    }
+                  )
+                except ClientError as e:
+                  if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                    return res(404,{'error':'profile not found'})
+                  raise
                 audit(uid,'UPDATE_PROFILE',dn)
                 return res(200,{'display_name':dn})
 
