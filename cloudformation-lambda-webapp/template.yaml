@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   会員制タスク管理 Web アプリのフルスタック構成。
-  VPC / Aurora Serverless v2 (Data API) / Cognito / API Gateway / Lambda /
+  Cognito / API Gateway / Lambda /
   CloudFront + S3 (OAC) / SQS / SNS / DynamoDB / CloudWatch を
   CloudFormation で一括デプロイするハンズオン教材です。
   スタック作成時にフロントエンドを自動配置し、削除時に自動クリーンアップします。
@@ -23,122 +23,42 @@ Parameters:
 # =========================================================================== #
 Resources:
 
-  # ======================== VPC & Networking ============================== #
-  VPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsHostnames: true
-      EnableDnsSupport: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-vpc'
-
-  PrivateSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-private-1'
-
-  PrivateSubnet2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-private-2'
-
-  PrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-private-rt'
-
-  PrivateSubnet1RTA:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
-
-  PrivateSubnet2RTA:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnet2
-      RouteTableId: !Ref PrivateRouteTable
-
-  RDSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow Aurora access within VPC
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          CidrIp: 10.0.0.0/16
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-rds-sg'
-
-  # ======================== Secrets Manager =============================== #
-  DBSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub '${ProjectName}-db-secret'
-      Description: Aurora DB credentials
-      GenerateSecretString:
-        SecretStringTemplate: '{"username":"appadmin"}'
-        GenerateStringKey: password
-        PasswordLength: 20
-        ExcludeCharacters: '"@/\\'
-
-  # ======================== Aurora Serverless v2 ========================== #
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: !Sub '${ProjectName} Aurora subnets'
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-
-  AuroraCluster:
-    Type: AWS::RDS::DBCluster
+  # ======================== DynamoDB (Tasks) ============================== #
+  TasksTable:
+    Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
     Properties:
-      Engine: aurora-mysql
-      DBClusterIdentifier: !Sub '${ProjectName}-cluster'
-      DatabaseName: taskapp
-      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
-      ServerlessV2ScalingConfiguration:
-        MinCapacity: 0.5
-        MaxCapacity: 2
-      EnableHttpEndpoint: true
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      VpcSecurityGroupIds:
-        - !GetAtt RDSSecurityGroup.GroupId
-      BackupRetentionPeriod: 1
-      StorageEncrypted: true
+      TableName: !Sub '${ProjectName}-tasks'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: task_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: task_id
+          KeyType: RANGE
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-aurora'
+          Value: !Sub '${ProjectName}-tasks'
 
-  AuroraInstance:
-    Type: AWS::RDS::DBInstance
+  UserProfilesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
     Properties:
-      Engine: aurora-mysql
-      DBClusterIdentifier: !Ref AuroraCluster
-      DBInstanceIdentifier: !Sub '${ProjectName}-instance-1'
-      DBInstanceClass: db.serverless
-      PubliclyAccessible: false
+      TableName: !Sub '${ProjectName}-user-profiles'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-profiles'
 
   # ======================== Cognito ======================================= #
   UserPool:
@@ -255,29 +175,28 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: RDSDataAPI
+        - PolicyName: TaskData
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - rds-data:ExecuteStatement
-                  - rds-data:BatchExecuteStatement
-                Resource: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:${ProjectName}-cluster'
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref DBSecret
-        - PolicyName: DynamoDB
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt TasksTable.Arn
+                  - !GetAtt UserProfilesTable.Arn
+        - PolicyName: AuditLog
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
                   - dynamodb:PutItem
-                  - dynamodb:Query
-                Resource:
-                  - !GetAtt AuditLogTable.Arn
-                  - !Sub '${AuditLogTable.Arn}/index/*'
+                Resource: !GetAtt AuditLogTable.Arn
         - PolicyName: SQSPublish
           PolicyDocument:
             Version: '2012-10-17'
@@ -325,33 +244,6 @@ Resources:
                 Action: dynamodb:PutItem
                 Resource: !GetAtt AuditLogTable.Arn
 
-  DBInitRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub '${ProjectName}-dbinit-role'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: RDSDataAPI
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - rds-data:ExecuteStatement
-                  - rds-data:BatchExecuteStatement
-                Resource: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:${ProjectName}-cluster'
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref DBSecret
-
   S3DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -389,7 +281,6 @@ Resources:
   # ======================== Lambda Functions =============================== #
   AppFunction:
     Type: AWS::Lambda::Function
-    DependsOn: AuroraInstance
     Properties:
       FunctionName: !Sub '${ProjectName}-app-handler'
       Runtime: python3.12
@@ -399,22 +290,22 @@ Resources:
       MemorySize: 256
       Environment:
         Variables:
-          CLUSTER_ARN: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:${ProjectName}-cluster'
-          SECRET_ARN: !Ref DBSecret
-          DATABASE: taskapp
+          TASKS_TABLE: !Ref TasksTable
+          PROFILE_TABLE: !Ref UserProfilesTable
           AUDIT_TABLE: !Ref AuditLogTable
           QUEUE_URL: !Ref TaskQueue
       Code:
         ZipFile: |
           import json, boto3, os, uuid, time
           from datetime import datetime, timezone
+          from boto3.dynamodb.conditions import Key
+          from botocore.exceptions import ClientError
 
-          rds = boto3.client('rds-data')
-          ddb = boto3.resource('dynamodb').Table(os.environ['AUDIT_TABLE'])
+          dynamodb = boto3.resource('dynamodb')
+          tasks_table = dynamodb.Table(os.environ['TASKS_TABLE'])
+          profiles_table = dynamodb.Table(os.environ['PROFILE_TABLE'])
+          audit_table = dynamodb.Table(os.environ['AUDIT_TABLE'])
           sqs = boto3.client('sqs')
-          C_ARN = os.environ['CLUSTER_ARN']
-          S_ARN = os.environ['SECRET_ARN']
-          DB    = os.environ['DATABASE']
           Q_URL = os.environ['QUEUE_URL']
 
           CORS = {
@@ -427,28 +318,20 @@ Resources:
           def res(code, body):
             return {'statusCode':code,'headers':CORS,'body':json.dumps(body,default=str)}
 
-          def sql(query, params=None):
-            kw = {'resourceArn':C_ARN,'secretArn':S_ARN,'database':DB,'sql':query,'includeResultMetadata':True}
-            if params: kw['parameters'] = params
-            return rds.execute_statement(**kw)
+          def now_iso():
+            return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-          def rows(resp):
-            cols = [c['name'] for c in resp.get('columnMetadata',[])]
-            out = []
-            for rec in resp.get('records',[]):
-              row = {}
-              for i,f in enumerate(rec):
-                v = None
-                for k in ('stringValue','longValue','doubleValue','booleanValue'):
-                  if k in f: v = f[k]; break
-                if 'isNull' in f and f['isNull']: v = None
-                row[cols[i]] = v
-              out.append(row)
-            return out
+          def task_item_to_response(item):
+            return {
+              'id': item['task_id'],
+              'title': item.get('title', ''),
+              'completed': bool(item.get('completed', False)),
+              'created_at': item.get('created_at')
+            }
 
           def audit(user, action, detail=''):
             try:
-              ddb.put_item(Item={'pk':user,'sk':f'{int(time.time()*1000)}#{uuid.uuid4().hex[:8]}','action':action,'detail':detail,'ttl':int(time.time())+86400*30})
+              audit_table.put_item(Item={'pk':user,'sk':f'{int(time.time()*1000)}#{uuid.uuid4().hex[:8]}','action':action,'detail':detail,'ttl':int(time.time())+86400*30})
             except Exception as e:
               print(f'Audit log error: {e}')
 
@@ -471,68 +354,88 @@ Resources:
             try:
               # --- Tasks CRUD ---
               if m == 'GET' and p == '/tasks':
-                r = sql('SELECT id,title,completed,created_at FROM tasks WHERE user_id=:u ORDER BY created_at DESC',
-                  [{'name':'u','value':{'stringValue':uid}}])
-                items = rows(r)
-                for it in items:
-                  if it.get('completed') is not None: it['completed'] = bool(it['completed'])
-                return res(200, items)
+                items = tasks_table.query(
+                  KeyConditionExpression=Key('user_id').eq(uid)
+                ).get('Items', [])
+                items.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+                return res(200, [task_item_to_response(item) for item in items])
 
               if m == 'POST' and p == '/tasks':
-                b = json.loads(event['body'])
+                b = json.loads(event.get('body') or '{}')
                 title = b.get('title','').strip()
                 if not title: return res(400,{'error':'title is required'})
                 tid = str(uuid.uuid4())
-                sql('INSERT INTO tasks(id,user_id,title,completed,created_at) VALUES(:i,:u,:t,0,NOW())',
-                  [{'name':'i','value':{'stringValue':tid}},
-                   {'name':'u','value':{'stringValue':uid}},
-                   {'name':'t','value':{'stringValue':title}}])
+                created_at = now_iso()
+                tasks_table.put_item(Item={
+                  'user_id': uid,
+                  'task_id': tid,
+                  'title': title,
+                  'completed': False,
+                  'created_at': created_at
+                })
                 audit(uid,'CREATE_TASK',tid)
                 enqueue('created',tid,uid)
-                return res(201,{'id':tid,'title':title,'completed':False,'created_at':datetime.now(timezone.utc).isoformat()})
+                return res(201,{'id':tid,'title':title,'completed':False,'created_at':created_at})
 
               if m == 'PUT' and '/tasks/' in p:
                 tid = pp.get('id','')
-                b = json.loads(event['body'])
-                comp = 1 if b.get('completed') else 0
-                r = sql('UPDATE tasks SET completed=:c WHERE id=:i AND user_id=:u',
-                  [{'name':'c','value':{'longValue':comp}},
-                   {'name':'i','value':{'stringValue':tid}},
-                   {'name':'u','value':{'stringValue':uid}}])
-                if r['numberOfRecordsUpdated'] == 0: return res(404,{'error':'not found'})
+                b = json.loads(event.get('body') or '{}')
+                comp = bool(b.get('completed'))
+                try:
+                  tasks_table.update_item(
+                    Key={'user_id': uid, 'task_id': tid},
+                    UpdateExpression='SET completed = :completed',
+                    ConditionExpression='attribute_exists(task_id)',
+                    ExpressionAttributeValues={':completed': comp}
+                  )
+                except ClientError as e:
+                  if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                    return res(404,{'error':'not found'})
+                  raise
                 audit(uid,'UPDATE_TASK',tid)
-                return res(200,{'id':tid,'completed':bool(comp)})
+                return res(200,{'id':tid,'completed':comp})
 
               if m == 'DELETE' and '/tasks/' in p:
                 tid = pp.get('id','')
-                r = sql('DELETE FROM tasks WHERE id=:i AND user_id=:u',
-                  [{'name':'i','value':{'stringValue':tid}},
-                   {'name':'u','value':{'stringValue':uid}}])
-                if r['numberOfRecordsUpdated'] == 0: return res(404,{'error':'not found'})
+                try:
+                  tasks_table.delete_item(
+                    Key={'user_id': uid, 'task_id': tid},
+                    ConditionExpression='attribute_exists(task_id)'
+                  )
+                except ClientError as e:
+                  if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                    return res(404,{'error':'not found'})
+                  raise
                 audit(uid,'DELETE_TASK',tid)
                 enqueue('deleted',tid,uid)
                 return res(200,{'message':'deleted'})
 
               # --- Profile ---
               if m == 'GET' and p == '/profile':
-                r = sql('SELECT user_id,email,display_name,created_at FROM user_profiles WHERE user_id=:u',
-                  [{'name':'u','value':{'stringValue':uid}}])
-                items = rows(r)
-                if not items:
-                  sql('INSERT INTO user_profiles(user_id,email,display_name,created_at) VALUES(:u,:e,:d,NOW())',
-                    [{'name':'u','value':{'stringValue':uid}},
-                     {'name':'e','value':{'stringValue':email}},
-                     {'name':'d','value':{'stringValue':email.split("@")[0]}}])
-                  return res(200,{'user_id':uid,'email':email,'display_name':email.split("@")[0]})
-                return res(200,items[0])
+                item = profiles_table.get_item(Key={'user_id': uid}).get('Item')
+                if not item:
+                  item = {
+                    'user_id': uid,
+                    'email': email,
+                    'display_name': email.split("@")[0] if email else 'guest',
+                    'created_at': now_iso()
+                  }
+                  profiles_table.put_item(Item=item)
+                return res(200,item)
 
               if m == 'PUT' and p == '/profile':
-                b = json.loads(event['body'])
+                b = json.loads(event.get('body') or '{}')
                 dn = b.get('display_name','').strip()
                 if not dn: return res(400,{'error':'display_name is required'})
-                sql('UPDATE user_profiles SET display_name=:d WHERE user_id=:u',
-                  [{'name':'d','value':{'stringValue':dn}},
-                   {'name':'u','value':{'stringValue':uid}}])
+                profiles_table.update_item(
+                  Key={'user_id': uid},
+                  UpdateExpression='SET display_name = :display_name, email = if_not_exists(email, :email), created_at = if_not_exists(created_at, :created_at)',
+                  ExpressionAttributeValues={
+                    ':display_name': dn,
+                    ':email': email,
+                    ':created_at': now_iso()
+                  }
+                )
                 audit(uid,'UPDATE_PROFILE',dn)
                 return res(200,{'display_name':dn})
 
@@ -587,69 +490,6 @@ Resources:
       FunctionName: !Ref WorkerFunction
       BatchSize: 5
       MaximumBatchingWindowInSeconds: 10
-
-  DBInitFunction:
-    Type: AWS::Lambda::Function
-    DependsOn: AuroraInstance
-    Properties:
-      FunctionName: !Sub '${ProjectName}-db-init'
-      Runtime: python3.12
-      Handler: index.handler
-      Role: !GetAtt DBInitRole.Arn
-      Timeout: 120
-      MemorySize: 128
-      Environment:
-        Variables:
-          CLUSTER_ARN: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:${ProjectName}-cluster'
-          SECRET_ARN: !Ref DBSecret
-          DATABASE: taskapp
-      Code:
-        ZipFile: |
-          import cfnresponse, boto3, os, time
-          rds = boto3.client('rds-data')
-          C = os.environ['CLUSTER_ARN']
-          S = os.environ['SECRET_ARN']
-          D = os.environ['DATABASE']
-
-          def run(sql):
-            return rds.execute_statement(resourceArn=C, secretArn=S, database=D, sql=sql)
-
-          def handler(event, context):
-            try:
-              if event['RequestType'] in ('Create', 'Update'):
-                for attempt in range(6):
-                  try:
-                    run('SELECT 1')
-                    break
-                  except Exception:
-                    print(f'DB not ready, retry {attempt+1}/6...')
-                    time.sleep(10 * (attempt + 1))
-                run("""CREATE TABLE IF NOT EXISTS tasks (
-                  id VARCHAR(36) PRIMARY KEY,
-                  user_id VARCHAR(128) NOT NULL,
-                  title VARCHAR(200) NOT NULL,
-                  completed TINYINT DEFAULT 0,
-                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                  INDEX idx_user (user_id)
-                )""")
-                run("""CREATE TABLE IF NOT EXISTS user_profiles (
-                  user_id VARCHAR(128) PRIMARY KEY,
-                  email VARCHAR(255) NOT NULL,
-                  display_name VARCHAR(100),
-                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )""")
-              cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Result': 'ok'})
-            except Exception as e:
-              print(str(e))
-              cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
-
-  DBInitCustomResource:
-    Type: Custom::DBInit
-    DependsOn:
-      - AuroraInstance
-      - AuroraCluster
-    Properties:
-      ServiceToken: !GetAtt DBInitFunction.Arn
 
   # ======================== S3 Deploy Lambda =============================== #
   S3DeployFunction:
@@ -881,7 +721,7 @@ Resources:
               </div>
               <div class="card" style="text-align:center;font-size:.75rem;color:var(--muted)">
                 <p>Powered by AWS</p>
-                <p style="margin-top:4px">CloudFormation / Cognito / Aurora<br/>API Gateway / Lambda / CloudFront<br/>S3 / DynamoDB / SQS / SNS</p>
+                <p style="margin-top:4px">CloudFormation / Cognito / DynamoDB<br/>API Gateway / Lambda / CloudFront<br/>S3 / SQS / SNS</p>
               </div>
             </div>
           </div>
@@ -1540,9 +1380,13 @@ Outputs:
     Description: Cognito ドメイン
     Value: !Sub '${ProjectName}-auth-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com'
 
-  AuroraClusterEndpoint:
-    Description: Aurora クラスターエンドポイント
-    Value: !GetAtt AuroraCluster.Endpoint.Address
+  TasksTableName:
+    Description: タスク保存用 DynamoDB テーブル名
+    Value: !Ref TasksTable
+
+  UserProfilesTableName:
+    Description: プロフィール保存用 DynamoDB テーブル名
+    Value: !Ref UserProfilesTable
 
   FrontendBucketName:
     Description: フロントエンド S3 バケット名
