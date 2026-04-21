@@ -1,6 +1,7 @@
 # CloudFormation フルスタック会員制タスク管理アプリ ハンズオン
 
 CloudFormation を使って **会員登録 / ログイン付きのタスク管理 Web アプリ** をワンクリックでデプロイするハンズオン教材です。
+このフォルダは [サーバーレスタスクアプリ学習パス](../README.md) の総まとめとして、個別に学んだサービスを一気に組み上げる位置付けになっています。
 スタックを作成するだけでフロントエンドからバックエンド・データベースまで一気に構築され、**削除もボタン一つ** で完了します。
 
 ## アーキテクチャ
@@ -59,11 +60,12 @@ CloudFront ──OAC──▶ S3 バケット          Cognito User Pool
 ## フォルダ構成
 
 ```text
-cloudformation-lambda-webapp/
-├── README.md                ← この手順書
-├── template.yaml            ← CloudFormation テンプレート（全リソース + 埋め込み HTML）
-└── frontend/
-    └── index.html           ← フロントエンド参照用（実際はテンプレートから自動デプロイ）
+serverless-task-app-learning-path/
+└── cloudformation-lambda-webapp/
+    ├── README.md                ← この手順書
+    ├── template.yaml            ← CloudFormation テンプレート（全リソース + 埋め込み HTML）
+    └── frontend/
+        └── index.html           ← フロントエンド参照用（実際はテンプレートから自動デプロイ）
 ```
 
 > **💡 ポイント**: `frontend/index.html` はリポジトリ上での参照用ファイルです。
@@ -113,6 +115,7 @@ cloudformation-lambda-webapp/
 #### 1-1. テンプレートを確認する
 
 `template.yaml` を開き、41 個のリソースの構成を確認してください。
+個別サービスのハンズオンを先に進めておくと、各リソースの役割が追いやすくなります。
 Infrastructure Composer で開くと、アーキテクチャ図として視覚的に確認できます。
 
 #### 1-2. AWS コンソールからデプロイする
